@@ -1,0 +1,241 @@
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xproviderconfigrequests.x.k8spin.cloud
+spec:
+  group: x.k8spin.cloud
+  names:
+    kind: XProviderConfigRequest
+    plural: xproviderconfigrequests
+  claimNames:
+    kind: ProviderConfigRequest
+    plural: providerconfigrequests
+  defaultCompositionRef:
+    name: defaultproviderconfigrequest
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              providerConfigRef:
+                description: ProviderConfigReference to the ProviderConfig used to
+                  connect to the provider
+                properties:
+                  name:
+                    description: Name of the ProviderConfig
+                    type: string
+                required:
+                - name
+                type: object
+              serviceAccountName:
+                type: string
+                description: The name of the service account to use for the token request.
+            required:
+            - providerConfigRef
+            - serviceAccountName
+          status:
+            description: A Status represents the observed state
+            properties:
+              share:
+                description: Freeform field containing status information
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+            type: object
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: defaultproviderconfigrequest
+  labels:
+    crossplane.io/xrd: xproviderconfigrequests.x.k8spin.cloud
+    provider: kubernetes
+spec:
+  compositeTypeRef:
+    apiVersion: x.k8spin.cloud/v1alpha1
+    kind: XProviderConfigRequest
+  resources:
+  - name: service-account-token
+    base:
+      apiVersion: kubernetes.crossplane.io/v1alpha1
+      kind: Object
+      spec:
+        forProvider:
+          manifest:
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: ""
+              namespace: ""
+              annotations:
+                kubernetes.io/service-account.name: ""
+            type: kubernetes.io/service-account-token
+        providerConfigRef: {}
+    patches:
+    - type: ToCompositeFieldPath
+      fromFieldPath: status.atProvider.manifest.data.token
+      toFieldPath: status.share.token
+      transforms:
+      - type: string
+        string:
+          type: Convert
+          convert: FromBase64
+    - type: ToCompositeFieldPath
+      fromFieldPath: status.atProvider.manifest.data["ca.crt"]
+      toFieldPath: status.share["ca.crt.b64"]
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.providerConfigRef
+      toFieldPath: spec.providerConfigRef
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.serviceAccountName
+      toFieldPath: spec.forProvider.manifest.metadata.name
+      transforms:
+      - type: string
+        string:
+          fmt: "%s-token"
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.claimRef.namespace
+      toFieldPath: spec.forProvider.manifest.metadata.namespace
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.serviceAccountName
+      toFieldPath: spec.forProvider.manifest.metadata.annotations["kubernetes.io/service-account.name"]
+  - name: kubeconfig-secret
+    base:
+      apiVersion: kubernetes.crossplane.io/v1alpha1
+      kind: Object
+      spec:
+        references:
+        - dependsOn:
+            apiVersion: v1
+            kind: Secret
+            name: ""
+            namespace: ""
+        forProvider:
+          manifest:
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: "" # TODO: Set this to the name of the XR
+              namespace: "" # TODO: Set this to the namespace of the XR
+            stringData:
+              kubeconfig: "" # TODO: Create a kubeconfig
+        providerConfigRef: {}
+    patches:
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.serviceAccountName
+      toFieldPath: spec.references[0].dependsOn.name
+      transforms:
+      - type: string
+        string:
+          fmt: "%s-token"
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.claimRef.namespace
+      toFieldPath: spec.references[0].dependsOn.namespace
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.serviceAccountName
+      toFieldPath: spec.forProvider.manifest.metadata.name
+      transforms:
+      - type: string
+        string:
+          fmt: "%s-kubeconfig"
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.providerConfigRef
+      toFieldPath: spec.providerConfigRef
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.claimRef.namespace
+      toFieldPath: spec.forProvider.manifest.metadata.namespace
+    - type: CombineFromComposite
+      combine:
+        variables:
+        - fromFieldPath: status.share["ca.crt.b64"]
+        - fromFieldPath: spec.claimRef.namespace
+        - fromFieldPath: status.share.token
+        strategy: string
+        string:
+          fmt: |
+            apiVersion: v1
+            kind: Config
+            clusters:
+            - cluster:
+                certificate-authority-data: %s
+                server: https://kubernetes.default.svc
+              name: default
+            contexts:
+            - context:
+                cluster: default
+                namespace: %s
+                user: default
+              name: default
+            current-context: default
+            users:
+            - name: default
+              user:
+                token: %s
+      toFieldPath: spec.forProvider.manifest.stringData.kubeconfig
+  - name: provider-config
+    base:
+      apiVersion: kubernetes.crossplane.io/v1alpha1
+      kind: Object
+      spec:
+        references:
+        - dependsOn:
+            apiVersion: v1
+            kind: Secret
+            name: ""
+            namespace: ""
+        forProvider:
+          manifest:
+            apiVersion: kubernetes.crossplane.io/v1alpha1
+            kind: ProviderConfig
+            metadata:
+              name: ""
+            spec:
+              credentials:
+                secretRef:
+                  namespace: ""
+                  name: ""
+                  key: kubeconfig
+                source: Secret
+        providerConfigRef: {}
+    patches:
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.serviceAccountName
+      toFieldPath: spec.references[0].dependsOn.name
+      transforms:
+      - type: string
+        string:
+          fmt: "%s-kubeconfig"
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.claimRef.namespace
+      toFieldPath: spec.references[0].dependsOn.namespace
+    - type: CombineFromComposite
+      combine:
+        variables:
+        - fromFieldPath: spec.claimRef.namespace
+        - fromFieldPath: spec.serviceAccountName
+        strategy: string
+        string:
+          fmt: "%s-%s-providerconfig"
+      toFieldPath: spec.forProvider.manifest.metadata.name
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.claimRef.namespace
+      toFieldPath: spec.forProvider.manifest.spec.credentials.secretRef.namespace
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.providerConfigRef
+      toFieldPath: spec.providerConfigRef
+    - type: FromCompositeFieldPath
+      fromFieldPath: spec.serviceAccountName
+      toFieldPath: spec.forProvider.manifest.spec.credentials.secretRef.name
+      transforms:
+      - type: string
+        string:
+          fmt: "%s-kubeconfig"
+    - type: ToCompositeFieldPath
+      fromFieldPath: spec.forProvider.manifest.metadata.name
+      toFieldPath: status.share.providerConfigRef.name

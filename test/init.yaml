@@ -1,0 +1,49 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: app-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-1
+---
+# Create a configmap in the app-1 namespace with a Hello World message
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: app-1
+data:
+  message: "Hello World!"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app-account
+  namespace: app-1
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: app-role-binding
+  namespace: app-1
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: app-role
+subjects:
+- kind: ServiceAccount
+  name: app-account
+  namespace: app-1

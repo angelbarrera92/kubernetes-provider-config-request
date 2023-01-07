@@ -1,0 +1,26 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: list-configmaps
+  namespace: app-1
+spec:
+  template:
+    spec:
+      containers:
+      - name: kubectl
+        image: bitnami/kubectl:1.25
+        command: ["kubectl", "get", "cm", "--kubeconfig", "/kubeconfig/config"]
+        volumeMounts:
+        - name: kubeconfig
+          mountPath: /kubeconfig
+          readOnly: true
+      volumes:
+      - name: kubeconfig
+        secret:
+          secretName: app-account-kubeconfig
+          items:
+          - key: kubeconfig
+            path: config
+      restartPolicy: Never
+  backoffLimit: 4

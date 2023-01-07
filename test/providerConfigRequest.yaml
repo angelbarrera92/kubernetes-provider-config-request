@@ -1,0 +1,10 @@
+---
+kind: ProviderConfigRequest
+apiVersion: x.k8spin.cloud/v1alpha1
+metadata:
+  name: kubernetes-provider-config
+  namespace: app-1
+spec:
+  providerConfigRef:
+    name: kubernetes-provider # this one has to be injected by a cluster-admin (or a mutation webhook)
+  serviceAccountName: app-account
